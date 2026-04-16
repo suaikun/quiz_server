@@ -27,7 +27,7 @@ func (h *HTTPHandler) RegisterRoutes(r *gin.Engine) {
 		// 1. 【公开接口】：注册、登录、看排行榜不需要身份证
 		api.POST("/register", h.Register)
 		api.POST("/login", h.Login)
-		api.GET("/leaderboard", h.GetLeaderboard) // 这里用到了 GetLeaderboard
+		api.GET("/leaderboard", h.GetLeaderboard) 
 
 		// 2. 【私密接口】：创建一个受 JWTAuthMiddleware 保护的路由组
 		// 只有带有合法 Token 的请求才能访问这里的接口
@@ -92,7 +92,7 @@ func (h *HTTPHandler) Login(c *gin.Context) {
 		return
 	}
 
-	// 把令牌发给前端，前端以后每次请求都要带上它！
+	// 把令牌发给前端，前端以后每次请求都要带上它
 	c.JSON(http.StatusOK, gin.H{"message": "登录成功", "token": token})
 }
 
@@ -137,7 +137,6 @@ func (h *HTTPHandler) Submit(c *gin.Context) {
 
 // GetLeaderboard 获取排行榜
 func (h *HTTPHandler) GetLeaderboard(c *gin.Context) {
-	// Redis 查询极快，如果 2 秒还没返回说明 Redis 出大问题了，直接超时切断
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 	defer cancel()
 

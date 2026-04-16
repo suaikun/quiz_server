@@ -23,7 +23,7 @@ type Config struct {
 	RedisDB       int
 
 	JWTSecret string
-	JWTExpire time.Duration // 【修复 2】：新增 JWT 过期时间配置项
+	JWTExpire time.Duration 
 }
 
 func Load() (Config, error) {

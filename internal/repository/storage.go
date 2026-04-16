@@ -37,9 +37,7 @@ func (s *Storage) CreateUser(ctx context.Context, username, password string) err
 	return err
 }
 
-// GetRandomQuestions 【重构亮点2】：废弃 ORDER BY RAND()，采用 Redis SRANDMEMBER 实现 O(1) 随机抽题
 func (s *Storage) GetRandomQuestions(ctx context.Context, limit int) ([]model.Question, error) {
-	// 1. 尝试从 Redis 的 Set 集合中随机抽取 limit 个题目 ID
 	idsStr, err := s.rdb.SRandMemberN(ctx, "quiz:questions:ids", int64(limit)).Result()
 	if err != nil && err != redis.Nil {
 		return nil, err
@@ -47,7 +45,7 @@ func (s *Storage) GetRandomQuestions(ctx context.Context, limit int) ([]model.Qu
 
 	var questionIDs []interface{}
 
-	// 2. 缓存穿透补偿机制：如果 Redis 中没有 ID 缓存（系统刚启动），则从 MySQL 预热全量 ID
+	// 如果 Redis 中没有 ID 缓存，则从 MySQL 预热全量 ID
 	if len(idsStr) == 0 {
 		rows, err := s.db.QueryContext(ctx, "SELECT id FROM questions")
 		if err != nil {
@@ -68,7 +66,6 @@ func (s *Storage) GetRandomQuestions(ctx context.Context, limit int) ([]model.Qu
 			// 将全量 ID 写入 Redis 的 Set 中，永不过期（除非题库更新）
 			s.rdb.SAdd(ctx, "quiz:questions:ids", allIDs...)
 			
-			// 为本次请求随机挑选前 limit 个（下次请求就会直接命中 Redis 缓存了）
 			for i := 0; i < limit && i < len(allIDs); i++ {
 				questionIDs = append(questionIDs, allIDs[i])
 			}
@@ -84,10 +81,10 @@ func (s *Storage) GetRandomQuestions(ctx context.Context, limit int) ([]model.Qu
 		return []model.Question{}, nil
 	}
 
-	// 3. 利用拿到的随机 ID，通过主键索引去 MySQL 极速拉取试题内容
+	// 利用拿到的随机 ID，通过主键索引去 MySQL 极速拉取试题内容
 	placeholders := make([]string, len(questionIDs))
 	for i := range placeholders {
-		placeholders[i] = "?" // 构造 (?, ?, ?) 占位符
+		placeholders[i] = "?" 
 	}
 	querySQL := fmt.Sprintf(
 		"SELECT id, text, opt_a, opt_b, opt_c, opt_d, answer FROM questions WHERE id IN (%s)",
@@ -111,7 +108,6 @@ func (s *Storage) GetRandomQuestions(ctx context.Context, limit int) ([]model.Qu
 		questions = append(questions, q)
 	}
 
-	// IN 查询返回的结果顺序往往不是随机的，所以我们在内存里打乱它
 	rand.Shuffle(len(questions), func(i, j int) {
 		questions[i], questions[j] = questions[j], questions[i]
 	})
@@ -119,10 +115,9 @@ func (s *Storage) GetRandomQuestions(ctx context.Context, limit int) ([]model.Qu
 	return questions, nil
 }
 
-// UpdateBestScore 【重构亮点1】：使用 MySQL UPSERT 彻底解决高并发下的“脏写/数据覆盖”漏洞
+// UpdateBestScore ,使用 MySQL UPSERT 彻底解决高并发下的“脏写/数据覆盖”漏洞
 func (s *Storage) UpdateBestScore(ctx context.Context, username string, newScore, newTime int) (bool, error) {
-	// 使用一行 SQL 搞定并发安全！
-	// ON DUPLICATE KEY UPDATE: 如果冲突了，只有在“新分数更高”或“同分但耗时更短”时，才更新值
+	// 如果冲突了，只有在“新分数更高”或“同分但耗时更短”时，才更新值
 	query := `
 		INSERT INTO user_scores (username, score, time_taken) 
 		VALUES (?, ?, ?) 
@@ -136,8 +131,6 @@ func (s *Storage) UpdateBestScore(ctx context.Context, username string, newScore
 		return false, err
 	}
 
-	// 巧妙判断是否刷新了最高记录：
-	// MySQL 中 UPSERT 操作的 RowsAffected() 规则：
 	// 插入新记录 = 1，更新老记录 = 2，数据没有变化(未打破记录) = 0
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
@@ -146,7 +139,7 @@ func (s *Storage) UpdateBestScore(ctx context.Context, username string, newScore
 
 	shouldUpdateCache := rowsAffected > 0
 
-	// 只有当真正插入了新成绩，或打破了旧记录时，我们才去更新 Redis 排行榜
+	// 只有当真正插入了新成绩，或打破了旧记录时，才去更新 Redis 排行榜
 	if shouldUpdateCache {
 		zScore := encodeZSetScore(newScore, newTime)
 		s.rdb.ZAdd(ctx, "quiz:leaderboard:zset", redis.Z{

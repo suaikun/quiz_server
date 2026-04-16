@@ -22,22 +22,21 @@ var (
 
 type QuizService struct {
 	repo *repository.Storage
-	cfg  config.Config // 【新增】引入配置，为了拿到 JWT 密钥
+	cfg  config.Config 
 }
 
 func NewQuizService(repo *repository.Storage, cfg config.Config) *QuizService {
 	return &QuizService{repo: repo, cfg: cfg}
 }
 
-// Register 处理注册逻辑 (引入 bcrypt 加密)
+// Register 处理注册逻辑 
 func (s *QuizService) Register(ctx context.Context, username, password string) error {
-	// 加盐哈希加密！(Cost 设为默认值 10)
+	// 加盐哈希加密
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return errors.New("密码加密失败")
 	}
 
-	// 存入数据库的是哈希后的乱码，不再是明文
 	err = s.repo.CreateUser(ctx, username, string(hashedPassword))
 	if err != nil {
 		return ErrUserExists
